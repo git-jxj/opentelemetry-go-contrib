@@ -14,6 +14,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Isolate attributes of derived loggers in `go.opentelemetry.io/contrib/bridges/otellogr`, preventing sibling loggers from overwriting each other's values and racing when calling `WithValues` concurrently.
+
 - Preserve explicit Unix epoch timestamps (`TimestampMs = 0`) instead of replacing them with the current time in `go.opentelemetry.io/contrib/bridges/prometheus`. (#9837)
 
 <!-- Released section -->

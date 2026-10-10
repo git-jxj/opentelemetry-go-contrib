@@ -56,6 +56,7 @@ package otellogr
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
@@ -266,7 +267,8 @@ func (l LogSink) WithName(name string) logr.LogSink {
 // WithValues returns a new LogSink with additional key/value pairs.
 func (l LogSink) WithValues(keysAndValues ...any) logr.LogSink {
 	ctx, attr := convertKVs(l.ctx, keysAndValues...)
-	l.attr = append(l.attr, attr...)
+	// Limit capacity so appending cannot overwrite another logger's attributes.
+	l.attr = append(slices.Clip(l.attr), attr...)
 	l.ctx = ctx
 	return &l
 }

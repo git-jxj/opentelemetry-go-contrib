@@ -6,6 +6,9 @@ package otellogr
 import (
 	"context"
 	"errors"
+	"slices"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -539,5 +542,55 @@ func TestConvertKVs(t *testing.T) {
 			assert.Equal(t, tt.wantKVs, kvs)
 			assert.Equal(t, tt.wantCtx, ctx)
 		})
+	}
+}
+
+func TestLogSinkWithValuesIsolatesChildren(t *testing.T) {
+	err := errors.New("failure")
+	rec := logtest.NewRecorder()
+	parent := logr.New(NewLogSink("name", WithLoggerProvider(rec))).
+		WithValues("one", 1).WithValues("two", 2).WithValues("three", 3)
+	first := parent.WithValues("child", "first")
+	second := parent.WithValues("child", "second")
+	first.Info("first")
+	second.Info("second")
+	first.Error(err, "error")
+	parent.Info("parent")
+	inherited := []attribute.KeyValue{attribute.Int("one", 1), attribute.Int("two", 2), attribute.Int("three", 3)}
+	logtest.AssertEqual(t, logtest.Recording{
+		logtest.Scope{Name: "name"}: {
+			{Body: attribute.StringValue("first"), Severity: log.SeverityInfo, Attributes: append(slices.Clone(inherited), attribute.String("child", "first"))},
+			{Body: attribute.StringValue("second"), Severity: log.SeverityInfo, Attributes: append(slices.Clone(inherited), attribute.String("child", "second"))},
+			{Body: attribute.StringValue("error"), Severity: log.SeverityError, Error: err, Attributes: append(slices.Clone(inherited), attribute.String("child", "first"))},
+			{Body: attribute.StringValue("parent"), Severity: log.SeverityInfo, Attributes: inherited},
+		},
+	}, rec.Result(), logtest.Transform(func(r logtest.Record) logtest.Record {
+		r.Context = nil
+		return r
+	}))
+}
+
+func TestLogSinkWithValuesConcurrentSafe(t *testing.T) {
+	rec := logtest.NewRecorder()
+	parent := logr.New(NewLogSink("name", WithLoggerProvider(rec))).
+		WithValues("one", 1).WithValues("two", 2).WithValues("three", 3)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range 16 {
+		wg.Go(func() {
+			<-start
+			name := strconv.Itoa(i)
+			child := parent.WithValues("child", name)
+			child.Info(name)
+		})
+	}
+	close(start)
+	wg.Wait()
+	records := rec.Result()[logtest.Scope{Name: "name"}]
+	assert.Len(t, records, 16)
+	for _, record := range records {
+		assert.Equal(t, []attribute.KeyValue{
+			attribute.Int("one", 1), attribute.Int("two", 2), attribute.Int("three", 3), attribute.String("child", record.Body.AsString()),
+		}, record.Attributes)
 	}
 }

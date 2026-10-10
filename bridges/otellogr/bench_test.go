@@ -168,3 +168,11 @@ func BenchmarkLogSinkErrorField(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkLogSinkWithValuesDerived(b *testing.B) {
+	parent := NewLogSink("name").WithValues("one", 1).WithValues("two", 2).WithValues("three", 3)
+	b.ReportAllocs()
+	for b.Loop() {
+		parent.WithValues("child", "value")
+	}
+}
