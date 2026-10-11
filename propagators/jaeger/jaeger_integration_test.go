@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 
@@ -89,6 +90,71 @@ func TestInjectJaeger(t *testing.T) {
 					if diff := cmp.Diff(result, want); diff != "" {
 						t.Errorf("%s: %s, header=%s: -got +want %s", tg.name, tc.name, h, diff)
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestExtractJaegerReplacesDebugFlag(t *testing.T) {
+	propagator := jaeger.Jaeger{}
+	for _, previousFlags := range []string{"1", "3"} {
+		for _, flags := range []string{"", "0", "1", "2", "3", "8", "9"} {
+			t.Run(previousFlags+"/"+flags, func(t *testing.T) {
+				ctx := propagator.Extract(t.Context(), propagation.MapCarrier{
+					"uber-trace-id": "11111111111111111111111111111111:1111111111111111:0:" + previousFlags,
+				})
+				header := "22222222222222222222222222222222:2222222222222222:0:"
+				ctx = propagator.Extract(ctx, propagation.MapCarrier{"uber-trace-id": header + flags})
+				sc := trace.SpanContextFromContext(ctx)
+				require.True(t, sc.IsValid())
+				assert.True(t, sc.IsRemote())
+				assert.Equal(t, "22222222222222222222222222222222", sc.TraceID().String())
+				assert.Equal(t, "2222222222222222", sc.SpanID().String())
+				assert.Equal(t, flags == "3", jaeger.DebugFromContext(ctx))
+				expectedFlags := "0"
+				switch flags {
+				case "1", "9":
+					expectedFlags = "1"
+				case "3":
+					expectedFlags = "3"
+				}
+				carrier := propagation.MapCarrier{}
+				propagator.Inject(ctx, carrier)
+				assert.Equal(t, header+expectedFlags, carrier["uber-trace-id"])
+			})
+		}
+	}
+}
+
+func TestExtractJaegerInvalidHeaderPreservesContext(t *testing.T) {
+	propagator := jaeger.Jaeger{}
+	ctx := propagator.Extract(t.Context(), propagation.MapCarrier{
+		"uber-trace-id": "11111111111111111111111111111111:1111111111111111:0:3",
+	})
+	for _, header := range []string{"", "invalid", "00000000000000000000000000000000:2222222222222222:0:0", "22222222222222222222222222222222::0:0"} {
+		t.Run(header, func(t *testing.T) {
+			got := propagator.Extract(ctx, propagation.MapCarrier{"uber-trace-id": header})
+			assert.Equal(t, ctx, got)
+			assert.True(t, jaeger.DebugFromContext(got))
+		})
+	}
+}
+
+func BenchmarkJaegerExtract(b *testing.B) {
+	propagator := jaeger.Jaeger{}
+	for _, previousFlags := range []string{"1", "3"} {
+		ctx := propagator.Extract(b.Context(), propagation.MapCarrier{
+			"uber-trace-id": "11111111111111111111111111111111:1111111111111111:0:" + previousFlags,
+		})
+		for _, flags := range []string{"0", "1", "3"} {
+			carrier := propagation.MapCarrier{
+				"uber-trace-id": "22222222222222222222222222222222:2222222222222222:0:" + flags,
+			}
+			b.Run(previousFlags+"/"+flags, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					propagator.Extract(ctx, carrier)
 				}
 			})
 		}

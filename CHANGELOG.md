@@ -14,6 +14,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Replace inherited debug state when extracting a valid header in `go.opentelemetry.io/contrib/propagators/jaeger`.
 - Preserve explicit Unix epoch timestamps (`TimestampMs = 0`) instead of replacing them with the current time in `go.opentelemetry.io/contrib/bridges/prometheus`. (#9837)
 
 <!-- Released section -->
